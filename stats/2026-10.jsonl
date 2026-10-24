@@ -1,0 +1,1 @@
+{"day": "2026-10-25", "status": "published", "issue": 1, "fetched": 20, "duplicates": 0, "excluded": 0, "candidates": 20, "selected": 6, "failed_batches": 0, "degraded": false, "llm_calls": 4, "prompt_tokens": 12363, "completion_tokens": 4558, "duration_seconds": 97.4}

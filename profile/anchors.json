@@ -1,0 +1,32 @@
+{
+  "source_hash": "c2d709d566cb1ee1b444d697ab2860a1a317e12fad021adc0866972858568a58",
+  "model": "gpt-6.1-sol",
+  "generated_at": "2026-10-24T20:04:42.748460Z",
+  "anchors": [
+    {
+      "name": "目标检测器的单源域泛化",
+      "query": "We study single-domain generalization for object detection, where a detector is trained on a single labeled source domain and evaluated on unseen target domains without access to target-domain data during training. Methods learn domain-invariant representations or introduce training objectives that improve robustness to distribution shifts while preserving localization and classification accuracy.",
+      "negative": false
+    },
+    {
+      "name": "风格迁移与图像转换驱动的检测泛化",
+      "query": "We investigate style transfer and image-to-image translation for improving the generalization of object detectors trained on a single source domain. Appearance-diverse training images simulate unseen visual domains and reduce reliance on source-specific textures, illumination, and rendering styles without requiring target-domain samples.",
+      "negative": false
+    },
+    {
+      "name": "风格增强与域随机化",
+      "query": "We explore style augmentation and domain randomization for single-source domain generalization in object detection. Methods perturb image appearance, feature statistics, textures, or environmental conditions to expand the source-domain distribution and improve detection robustness under unseen domain shifts.",
+      "negative": false
+    },
+    {
+      "name": "保持语义、边界框与小目标细节的外观变换",
+      "query": "We develop content-preserving appearance transformations for domain-generalized object detection that maintain object identity, spatial geometry, bounding-box alignment, and fine-grained details of small objects. Semantic consistency, structure preservation, and detection-aware constraints prevent style transfer or augmentation from corrupting annotations and localization cues.",
+      "negative": false
+    },
+    {
+      "name": "跨域检测的泛化机制与失效分析",
+      "query": "We analyze the mechanisms underlying cross-domain robustness in object detectors, including sensitivity to appearance shifts, texture bias, and the transferability of learned representations. Evaluation on real-world cross-domain detection benchmarks combines controlled ablations with failure analysis across object scales and domain-shift conditions to explain when generalization methods succeed or fail.",
+      "negative": false
+    }
+  ]
+}
