@@ -1,0 +1,41 @@
+{
+  "day": "2026-10-29",
+  "generated_at": "2026-10-29T14:09:06.169745Z",
+  "overview": "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；改用 arXiv API 补抓了最近 7 天内提交的 500 篇论文，但都已在之前的日报中处理过或被关键词黑名单排除，没有新论文可发布。",
+  "papers": [],
+  "others": [],
+  "stats": {
+    "fetched": 500,
+    "duplicates": 500,
+    "excluded": 0,
+    "candidates": 0,
+    "selected": 0,
+    "failed_batches": 0,
+    "degraded": false,
+    "llm_calls": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "duration_seconds": 5.3,
+    "feedback": {
+      "up": 0,
+      "down": 0,
+      "like": 0,
+      "dislike": 0,
+      "implicit": 0,
+      "positive": 0,
+      "negative": 0,
+      "muted": 0,
+      "synced": 0,
+      "sync_error": null
+    },
+    "zotero": null,
+    "deep_read": 0,
+    "deep_read_notes": [],
+    "fallback": "papers"
+  },
+  "issue_number": 11,
+  "issue_url": "https://github.com/stanGSA/Paper-gleaner/issues/11",
+  "comment_ids": {},
+  "notifications": {},
+  "deep_reads": []
+}
