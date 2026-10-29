@@ -169,6 +169,9 @@ def test_daily_publishes_issue_and_data(
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     respx.get(RSS_URL).mock(return_value=httpx.Response(200, content=rss_bytes))
     respx.get(f"{API}/issues").mock(return_value=httpx.Response(200, json=[]))
+    respx.post(f"{API}/labels").mock(
+        return_value=httpx.Response(201, json={"name": "gleaner"})
+    )
     respx.post(f"{API}/labels").mock(return_value=httpx.Response(201, json={}))
     respx.post(f"{API}/issues").mock(
         return_value=httpx.Response(
