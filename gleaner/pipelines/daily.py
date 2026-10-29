@@ -280,9 +280,7 @@ def run_daily(
     notified: dict[str, ChannelResult] = {}
     if not digest.papers:
         digest = digest.model_copy(
-            update={
-                "overview": "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
-            }
+            update={"overview": "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"}
         )
         status = "nothing_relevant"
         if publisher is not None:
