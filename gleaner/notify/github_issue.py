@@ -149,6 +149,14 @@ class GitHubClient:
         )
         self._check(response, "更新引导 Issue")
 
+    def edit_issue(self, issue_number: int, *, title: str, body: str) -> None:
+        response = self._request(
+            "PATCH",
+            f"/repos/{self.repository}/issues/{issue_number}",
+            json={"title": title, "body": body},
+        )
+        self._check(response, "更新日报 Issue")
+
     def _paginate(
         self, url: str, action: str, *, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
@@ -246,6 +254,16 @@ class IssuePublisher:
         papers = list(enumerate(digest.papers, start=1))
         self._post_comments(issue.number, papers, comment_ids, reports or {})
         return self.repair(digest.model_copy(update={"comment_ids": comment_ids}), reports)
+
+    def refresh(self, digest: Digest, reports: Mapping[str, DeepReport] | None = None) -> Digest:
+        """用重新生成的 digest 更新当天已有的 Issue（digest.issue_number），并发布论文评论。
+
+        用于当天先发了没有论文的说明 Issue、之后重新抓取到论文的情况，不再另开一个 Issue。
+        """
+        assert digest.issue_number is not None
+        body = issue_body(digest, per_paper_comment=self.config.per_paper_comment)
+        self.github.edit_issue(digest.issue_number, title=issue_title(digest), body=body)
+        return self.repair(digest.model_copy(update={"comment_ids": {}}), reports)
 
     def repair(self, digest: Digest, reports: Mapping[str, DeepReport] | None = None) -> Digest:
         """补发 digest 中缺失的论文评论，返回更新了 comment_ids 的 digest。

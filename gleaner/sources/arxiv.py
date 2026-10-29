@@ -25,7 +25,7 @@ import httpx
 from gleaner import __version__
 from gleaner.config import ArxivConfig
 from gleaner.models import Paper
-from gleaner.sources.base import SourceError
+from gleaner.sources.base import Announcement, SourceError
 
 RSS_URL = "https://rss.arxiv.org/rss/{categories}"
 API_URL = "https://export.arxiv.org/api/query"
@@ -84,8 +84,11 @@ class ArxivSource:
         return RSS_URL.format(categories="+".join(self.config.categories))
 
     def fetch_latest(self) -> list[Paper]:
+        return self.fetch_announcement().papers
+
+    def fetch_announcement(self) -> Announcement:
         papers = parse_rss(self._download(self.feed_url, what="arXiv RSS"))
-        return [paper for paper in papers if self._wanted(paper)]
+        return Announcement([paper for paper in papers if self._wanted(paper)], len(papers))
 
     def fetch_recent(self, limit: int) -> list[Paper]:
         """所关注分类中最近提交的 limit 篇论文，不区分公告日。

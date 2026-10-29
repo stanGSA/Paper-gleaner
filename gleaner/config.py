@@ -65,7 +65,7 @@ class ArxivConfig(_Section):
     include_cross_list: bool = True
     include_replace: bool = False
     # RSS 没有公告条目时（节假日或 arXiv 推迟公告），改用 arXiv API 取最近提交的这么多篇论文，
-    # 去掉之前处理过的再照常排序发布；0 表示不补抓，只发一个说明原因的 Issue
+    # 只保留 7 天内提交、之前没处理过的再照常排序发布；0 表示不补抓，只发一个说明原因的 Issue
     fallback_max_results: int = Field(500, ge=0, le=2000)
 
 

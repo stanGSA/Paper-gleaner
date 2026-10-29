@@ -1,5 +1,5 @@
 from gleaner.sources.arxiv import ArxivSource
-from gleaner.sources.base import Source, SourceError
+from gleaner.sources.base import Announcement, Source, SourceError
 from gleaner.sources.semantic_scholar import (
     RelatedPaper,
     RelatedWorks,
@@ -8,6 +8,7 @@ from gleaner.sources.semantic_scholar import (
 )
 
 __all__ = [
+    "Announcement",
     "ArxivSource",
     "RelatedPaper",
     "RelatedWorks",

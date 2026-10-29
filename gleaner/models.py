@@ -79,6 +79,9 @@ class ZoteroStats(BaseModel):
     error: str | None = None
 
 
+FallbackStatus = Literal["papers", "empty", "failed"]
+
+
 class RunStats(BaseModel):
     fetched: int = 0
     duplicates: int = 0
@@ -95,8 +98,9 @@ class RunStats(BaseModel):
     zotero: ZoteroStats | None = None  # 没有启用 Zotero 时为 None
     deep_read: int = 0  # 自动深读的篇数（报告附在论文评论里）
     deep_read_notes: list[str] = Field(default_factory=list)  # 没有自动深读的原因，如超出预算
-    # arXiv RSS 没有公告条目，改用 arXiv API 补抓了最近提交的论文
-    fallback: bool = False
+    # arXiv RSS 没有公告条目时的补抓结果：papers 取到了论文，empty 没有取到，failed 请求失败；
+    # 有公告或没有补抓时为 None
+    fallback: FallbackStatus | None = None
 
 
 class ChannelResult(BaseModel):

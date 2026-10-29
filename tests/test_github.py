@@ -211,6 +211,26 @@ def test_repair_posts_only_missing_comments() -> None:
 
 
 @respx.mock
+def test_refresh_updates_existing_issue_and_posts_comments() -> None:
+    edit = respx.patch(f"{API}/issues/5").mock(return_value=httpx.Response(200, json={}))
+    respx.get(f"{API}/issues/5/comments").mock(return_value=httpx.Response(200, json=[]))
+    comments = respx.post(f"{API}/issues/5/comments").mock(
+        side_effect=[httpx.Response(201, json={"id": 301}), httpx.Response(201, json={"id": 302})]
+    )
+    created = respx.post(f"{API}/issues")
+    digest = make_digest().model_copy(update={"issue_number": 5, "issue_url": "https://x/5"})
+
+    refreshed = make_publisher().refresh(digest)
+
+    sent = json.loads(edit.calls.last.request.content)
+    assert sent["title"] == "📚 Paper Gleaner · 2026-10-26 · 2 篇"
+    assert "Paper 1" in sent["body"]
+    assert comments.call_count == 2
+    assert not created.called  # 不另开 Issue
+    assert refreshed.comment_ids == {"2610.00001": 301, "2610.00002": 302}
+
+
+@respx.mock
 def test_repair_without_missing_comments_makes_no_requests() -> None:
     digest = make_digest(1).model_copy(
         update={"issue_number": 5, "comment_ids": {"2610.00001": 101}}

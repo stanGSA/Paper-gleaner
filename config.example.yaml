@@ -9,7 +9,7 @@ sources:
     categories: [cs.CL, cs.LG, cs.AI]
     include_cross_list: true       # 是否包含从其它分类交叉投递过来的论文
     include_replace: false         # 是否包含旧论文的新版本
-    fallback_max_results: 500      # RSS 没有公告条目时改用 arXiv API 补抓最近提交的这么多篇（去掉推送过的）；0 表示不补抓
+    fallback_max_results: 500      # RSS 没有公告条目时改用 arXiv API 补抓最近提交的论文，最多这么多篇（只保留 7 天内提交、没推送过的）；0 表示不补抓
 
 profile:
   interests_file: profile/interests.md

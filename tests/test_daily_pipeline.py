@@ -23,7 +23,7 @@ from gleaner.profile import (
 from gleaner.profile.muted import MUTED_PATH
 from gleaner.reader import FullText, Section, load_report, save_report
 from gleaner.sources.arxiv import parse_rss
-from gleaner.sources.base import SourceError
+from gleaner.sources.base import Announcement, SourceError
 from gleaner.sources.zotero import ZoteroResult
 from gleaner.store import DataStore
 from tests.conftest import (
@@ -48,16 +48,21 @@ class FakeSource:
         papers: list[Paper],
         recent: list[Paper] | None = None,
         recent_error: Exception | None = None,
+        entries: int | None = None,
     ) -> None:
         self.papers = papers
         self.recent = recent or []
         self.recent_error = recent_error
+        self.entries = len(papers) if entries is None else entries  # 过滤前的公告条数
         self.calls = 0
         self.recent_limits: list[int] = []
 
     def fetch_latest(self) -> list[Paper]:
+        return self.fetch_announcement().papers
+
+    def fetch_announcement(self) -> Announcement:
         self.calls += 1
-        return self.papers
+        return Announcement(self.papers, self.entries)
 
     def fetch_recent(self, limit: int) -> list[Paper]:
         self.recent_limits.append(limit)
@@ -71,6 +76,7 @@ class FakePublisher:
         self.existing = existing
         self.published: list[Digest] = []
         self.repaired: list[Digest] = []
+        self.refreshed: list[Digest] = []
         self.reports: list[dict] = []  # 每次 publish / repair 收到的自动深读报告
         self.closed = 0
 
@@ -81,6 +87,12 @@ class FakePublisher:
         self.published.append(digest)
         self.reports.append(dict(reports or {}))
         return digest.model_copy(update={"issue_number": 7, "issue_url": "https://x/7"})
+
+    def refresh(self, digest: Digest, reports=None) -> Digest:
+        self.refreshed.append(digest)
+        self.reports.append(dict(reports or {}))
+        ids = {p.id: 800 + i for i, p in enumerate(digest.papers)}
+        return digest.model_copy(update={"comment_ids": ids})
 
     def repair(self, digest: Digest, reports=None) -> Digest:
         self.repaired.append(digest)
@@ -144,7 +156,10 @@ def papers(rss_bytes: bytes) -> list[Paper]:
 def run(config: Config, store: DataStore, papers: list[Paper], scores=SCORES, **kwargs):
     llm, fake = fake_llm(pipeline_llm(scores))
     source = FakeSource(
-        papers, recent=kwargs.pop("recent", None), recent_error=kwargs.pop("recent_error", None)
+        papers,
+        recent=kwargs.pop("recent", None),
+        recent_error=kwargs.pop("recent_error", None),
+        entries=kwargs.pop("entries", None),
     )
     result = run_daily(
         config,
@@ -387,9 +402,9 @@ def test_no_announcements(config: Config, tmp_path: Path) -> None:
     assert len(publisher.published) == 1
     assert result.digest.overview == (
         "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；"
-        "改用 arXiv API 补抓也没有取到论文，因此没有可发布的论文。"
+        "改用 arXiv API 补抓也没有取到最近 7 天内提交的论文，因此没有可发布的论文。"
     )
-    assert result.digest.stats.fallback is True
+    assert result.digest.stats.fallback == "empty"
     assert store.read_model(digest_path(TODAY), Digest) is not None
 
 
@@ -404,7 +419,22 @@ def test_no_announcements_without_fallback(config: Config, tmp_path: Path) -> No
     assert result.digest.overview == (
         "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告），因此没有可发布的论文。"
     )
-    assert result.digest.stats.fallback is False
+    assert result.digest.stats.fallback is None
+
+
+def test_no_fallback_when_announcements_are_filtered_out(config: Config, tmp_path: Path) -> None:
+    # RSS 有公告，只是都被 include_cross_list / include_replace 过滤掉了：不补抓，免得绕过配置
+    publisher = FakePublisher()
+
+    result, _, source = run(config, DataStore(tmp_path), [], entries=2, publisher=publisher)
+
+    assert result.status == "published"
+    assert source.recent_limits == []
+    assert result.digest.overview == (
+        "今天 arXiv 有 2 条公告，但都是交叉投递或旧论文的新版本，"
+        "按当前配置（include_cross_list、include_replace）不收录，因此没有可发布的论文。"
+    )
+    assert result.digest.stats.fallback is None
 
 
 def test_fallback_publishes_recent_papers(
@@ -419,12 +449,12 @@ def test_fallback_publishes_recent_papers(
     )
 
     assert result.status == "published"
-    assert result.fallback is True
+    assert result.fallback == "papers"
     assert source.recent_limits == [500]
     digest = result.digest
     assert [p.id for p in digest.papers] == ["2610.00001", "2610.00002"]
     assert digest.overview == f"{FALLBACK_NOTICE}\n\n今天以长上下文推理为主，建议先读 [1]。"
-    assert digest.stats.fallback is True
+    assert digest.stats.fallback == "papers"
     assert digest.stats.fetched == 3
     assert len(publisher.published) == 1
     assert len(email.sent) == 1
@@ -433,7 +463,25 @@ def test_fallback_publishes_recent_papers(
         {"id": p.id, "date": TODAY.isoformat()} for p in papers
     ]
     stats = store.read_jsonl("stats/2026-10.jsonl")
-    assert stats[-1]["fallback"] is True
+    assert stats[-1]["fallback"] == "papers"
+
+
+def test_fallback_ignores_papers_older_than_dedup_window(
+    config: Config, papers: list[Paper], tmp_path: Path
+) -> None:
+    # 6 月处理过的论文已经超出去重回看的三个月，查不到处理记录；靠提交时间排除，不能再推一次
+    store = DataStore(tmp_path)
+    old = papers[0].model_copy(update={"announced": datetime(2026, 6, 16, tzinfo=UTC)})
+    record_seen(store, [old], date(2026, 6, 16))
+    week_old = papers[1].model_copy(update={"announced": datetime(2026, 10, 18, tzinfo=UTC)})
+
+    result, _, _ = run(config, store, [], recent=[old, week_old], publisher=FakePublisher())
+
+    assert result.status == "published"
+    assert result.digest.papers == []
+    assert result.digest.stats.fallback == "empty"
+    assert result.digest.stats.fetched == 0
+    assert "补抓也没有取到最近 7 天内提交的论文" in result.digest.overview
 
 
 def test_fallback_skips_papers_already_pushed(
@@ -452,8 +500,8 @@ def test_fallback_skips_papers_already_pushed(
     assert result.digest.stats.duplicates == 3
     assert result.digest.overview == (
         "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；"
-        "改用 arXiv API 补抓了最近提交的 3 篇论文，但都已在之前的日报中处理过或被关键词黑名单排除，"
-        "没有新论文可发布。"
+        "改用 arXiv API 补抓了最近 7 天内提交的 3 篇论文，"
+        "但都已在之前的日报中处理过或被关键词黑名单排除，没有新论文可发布。"
     )
     assert email.sent == []
 
@@ -468,7 +516,7 @@ def test_fallback_below_threshold(config: Config, papers: list[Paper], tmp_path:
     assert result.status == "published"
     assert result.digest.overview == (
         "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；"
-        "改用 arXiv API 补抓了最近提交的 3 篇论文，"
+        "改用 arXiv API 补抓了最近 7 天内提交的 3 篇论文，"
         "但没有论文达到当前筛选阈值，因此没有可发布的论文。"
     )
 
@@ -486,6 +534,7 @@ def test_fallback_failure_still_publishes_explanation(config: Config, tmp_path: 
 
     assert result.status == "published"
     assert len(publisher.published) == 1
+    assert result.digest.stats.fallback == "failed"
     assert result.digest.overview == (
         "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；"
         "改用 arXiv API 补抓也失败了（详见运行日志），因此没有可发布的论文。"
@@ -493,6 +542,46 @@ def test_fallback_failure_still_publishes_explanation(config: Config, tmp_path: 
     assert result.warnings == [
         "arXiv RSS 没有公告条目，改用 arXiv API 补抓也失败了：抓取 arXiv API 失败：503"
     ]
+
+
+def test_retries_after_explanation_issue(
+    config: Config, papers: list[Paper], tmp_path: Path
+) -> None:
+    # 09:30 补抓失败，只发了说明 Issue；11:30 的兜底运行重新抓取，结果写回同一个 Issue
+    store = DataStore(tmp_path)
+    run(config, store, [], recent_error=SourceError("503"), publisher=FakePublisher())
+    publisher = FakePublisher(existing=IssueRef(number=7, url="https://x/7"))
+    email = FakeNotifier("email")
+
+    result, _, source = run(config, store, papers, publisher=publisher, notifiers=[email])
+
+    assert result.status == "published"
+    assert source.calls == 1
+    assert publisher.published == []  # 不另开 Issue
+    assert len(publisher.refreshed) == 1
+    digest = result.digest
+    assert (digest.issue_number, digest.issue_url) == (7, "https://x/7")
+    assert [p.id for p in digest.papers] == ["2610.00001", "2610.00002"]
+    assert digest.comment_ids == {"2610.00001": 800, "2610.00002": 801}
+    assert len(email.sent) == 1
+    assert store.read_model(digest_path(TODAY), Digest) == digest
+
+
+def test_no_retry_after_nothing_relevant(
+    config: Config, papers: list[Paper], tmp_path: Path
+) -> None:
+    # 精排过、只是没有论文达到阈值：重跑也是同样的结果，不再抓取，也不再调用 LLM
+    store = DataStore(tmp_path)
+    low = {paper_id: 3 for paper_id in SCORES}
+    run(config, store, papers, scores=low, publisher=FakePublisher())
+
+    publisher = FakePublisher(existing=IssueRef(number=7, url="https://x/7"))
+    result, fake, source = run(config, store, papers, publisher=publisher)
+
+    assert result.status == "already_published"
+    assert source.calls == 0
+    assert fake.requests == []
+    assert publisher.refreshed == []
 
 
 def test_nothing_relevant(config: Config, papers: list[Paper], tmp_path: Path) -> None:
@@ -561,7 +650,7 @@ def test_no_sampling_when_publishing(config: Config, papers: list[Paper], tmp_pa
     # 正式发布时不试运行抽样，而是补抓：去重并记为已处理
     assert result.status == "published"
     assert result.sampled is False
-    assert result.fallback is True
+    assert result.fallback == "papers"
     assert source.recent_limits == [500]
 
 

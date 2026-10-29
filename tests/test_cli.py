@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -610,8 +610,10 @@ def test_daily_without_announcements_falls_back_to_recent_papers(
 ) -> None:
     github_env(monkeypatch)
     respx.get(RSS_URL).mock(return_value=httpx.Response(200, content=empty_rss_bytes))
+    # 补抓只保留最近 7 天内提交的论文：把测试数据的提交日期改成今天
+    recent = api_bytes.replace(b"2026-10-23T", f"{datetime.now(UTC):%Y-%m-%d}T".encode())
     api = respx.get("https://export.arxiv.org/api/query").mock(
-        return_value=httpx.Response(200, content=api_bytes)
+        return_value=httpx.Response(200, content=recent)
     )
     issue = mock_issue_publishing()
 
