@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -588,19 +588,63 @@ def test_daily_requires_interests(repo: Path) -> None:
     assert "interests.example.md" in result.output
 
 
+def mock_issue_publishing() -> respx.Route:
+    """创建日报 Issue（编号 5）所需的 GitHub 接口；返回创建 Issue 的路由。"""
+    respx.get(f"{API}/issues").mock(return_value=httpx.Response(200, json=[]))
+    respx.post(f"{API}/labels").mock(return_value=httpx.Response(201, json={}))
+    respx.post(f"{API}/issues/5/comments").mock(return_value=httpx.Response(201, json={"id": 100}))
+    return respx.post(f"{API}/issues").mock(
+        return_value=httpx.Response(
+            201, json={"number": 5, "html_url": "https://github.com/o/r/issues/5"}
+        )
+    )
+
+
 @respx.mock
-def test_daily_without_announcements(
-    repo: Path, empty_rss_bytes: bytes, git_remote: Path, monkeypatch: pytest.MonkeyPatch
+def test_daily_without_announcements_falls_back_to_recent_papers(
+    repo: Path,
+    empty_rss_bytes: bytes,
+    api_bytes: bytes,
+    git_remote: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     github_env(monkeypatch)
-    respx.get(f"{API}/issues").mock(return_value=httpx.Response(200, json=[]))
     respx.get(RSS_URL).mock(return_value=httpx.Response(200, content=empty_rss_bytes))
+    # 补抓只保留最近 7 天内提交的论文：把测试数据的提交日期改成今天
+    recent = api_bytes.replace(b"2026-10-23T", f"{datetime.now(UTC):%Y-%m-%d}T".encode())
+    api = respx.get("https://export.arxiv.org/api/query").mock(
+        return_value=httpx.Response(200, content=recent)
+    )
+    issue = mock_issue_publishing()
 
     result = runner.invoke(app, ["daily"])
 
     assert result.exit_code == 0, result.output
-    assert "今天没有新公告" in result.output
-    assert not data_branch_exists(git_remote)
+    assert "✓ 已发布：https://github.com/o/r/issues/5" in result.output
+    assert "以下论文改由 arXiv API 补抓" in result.output
+    assert "[1] 9/10  2610.00001  LongKV" in result.output
+    assert api.calls.last.request.url.params["max_results"] == "500"
+    assert "以下论文改由 arXiv API 补抓" in json.loads(issue.calls.last.request.content)["body"]
+    assert data_branch_exists(git_remote)
+
+
+@respx.mock
+def test_daily_publishes_explanation_when_fallback_fails(
+    repo: Path, empty_rss_bytes: bytes, git_remote: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github_env(monkeypatch)
+    respx.get(RSS_URL).mock(return_value=httpx.Response(200, content=empty_rss_bytes))
+    respx.get("https://export.arxiv.org/api/query").mock(return_value=httpx.Response(503))
+    issue = mock_issue_publishing()
+
+    result = runner.invoke(app, ["daily"])
+
+    assert result.exit_code == 0, result.output
+    assert "✓ 已发布：https://github.com/o/r/issues/5" in result.output
+    assert "! arXiv RSS 没有公告条目，改用 arXiv API 补抓也失败了" in result.output
+    body = json.loads(issue.calls.last.request.content)["body"]
+    assert "改用 arXiv API 补抓也失败了（详见运行日志），因此没有可发布的论文" in body
+    assert data_branch_exists(git_remote)
 
 
 @respx.mock
