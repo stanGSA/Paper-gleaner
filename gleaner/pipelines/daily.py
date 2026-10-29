@@ -28,7 +28,7 @@ from pydantic import ValidationError
 from gleaner.config import Config
 from gleaner.filters import apply_filters, load_seen, record_seen
 from gleaner.llm import BudgetExceededError, LLMClient, LLMError
-from gleaner.models import ChannelResult, DeepReport, Digest, RunStats, ScoredPaper
+from gleaner.models import ChannelResult, DeepReport, Digest, FeedbackStats, RunStats, ScoredPaper
 from gleaner.notify import IssueRef
 from gleaner.notify.base import Notifier
 from gleaner.notify.dispatch import failed_channels, failure_warnings, send_all
@@ -168,7 +168,28 @@ def run_daily(
     if sampled and sample_size:
         papers = source.fetch_recent(sample_size)
     if not papers:
-        return DailyResult("no_announcements", sync=sync, warnings=warnings)
+        digest = Digest(
+            day=today,
+            generated_at=now,
+            overview="今天没有新公告（arXiv 周末和节假日不更新）。",
+            stats=RunStats(
+                feedback=FeedbackStats(
+                    synced=sync.records,
+                    sync_error=sync.error,
+                )
+            ),
+        )
+        status: Status = "no_announcements"
+        if publisher is not None:
+            digest = publisher.publish(digest)
+            status = "published"
+            publisher.close_stale(now)
+        store.write_model(digest_path(today), digest)
+        store.append_jsonl(
+            f"stats/{today:%Y-%m}.jsonl",
+            [{"day": today.isoformat(), "status": status, "issue": digest.issue_number, **digest.stats.model_dump()}],
+        )
+        return DailyResult(status, digest, sync=sync, warnings=warnings)
 
     seen = set() if sampled else load_seen(store, today)
     filtered = apply_filters(papers, seen=seen, config=config.filters)
@@ -251,7 +272,15 @@ def run_daily(
     status: Status = "preview"
     notified: dict[str, ChannelResult] = {}
     if not digest.papers:
+        digest = digest.model_copy(
+            update={
+                "overview": "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
+            }
+        )
         status = "nothing_relevant"
+        if publisher is not None:
+            digest = publisher.publish(digest, reports)
+            status = "published"
     else:
         if publisher is not None:
             digest = publisher.publish(digest, reports)
