@@ -386,7 +386,9 @@ def test_nothing_relevant(config: Config, papers: list[Paper], tmp_path: Path) -
 
     assert result.status == "published"
     assert len(publisher.published) == 1
-    assert result.digest.overview == "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
+    assert result.digest.overview == (
+        "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
+    )
     assert len(result.digest.others) == 3
     assert len(fake.requests) == 2  # 没有入选论文时不生成概览
     assert store.read_model(digest_path(TODAY), Digest) is not None
