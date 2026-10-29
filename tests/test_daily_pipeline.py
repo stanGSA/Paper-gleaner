@@ -367,12 +367,14 @@ def test_no_notification_without_announcements(config: Config, tmp_path: Path) -
 
 def test_no_announcements(config: Config, tmp_path: Path) -> None:
     publisher = FakePublisher()
-    result, fake, _ = run(config, DataStore(tmp_path / "data"), [], publisher=publisher)
+    store = DataStore(tmp_path / "data")
+    result, fake, _ = run(config, store, [], publisher=publisher)
 
-    assert result.status == "no_announcements"
+    assert result.status == "published"
     assert fake.requests == []
-    assert publisher.published == []
-    assert not (tmp_path / "data").exists()
+    assert len(publisher.published) == 1
+    assert result.digest.overview == "今天没有新公告（arXiv 周末和节假日不更新）。"
+    assert store.read_model(digest_path(TODAY), Digest) is not None
 
 
 def test_nothing_relevant(config: Config, papers: list[Paper], tmp_path: Path) -> None:
@@ -382,8 +384,9 @@ def test_nothing_relevant(config: Config, papers: list[Paper], tmp_path: Path) -
 
     result, fake, _ = run(config, store, papers, scores=low, publisher=publisher)
 
-    assert result.status == "nothing_relevant"
-    assert publisher.published == []
+    assert result.status == "published"
+    assert len(publisher.published) == 1
+    assert result.digest.overview == "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
     assert len(result.digest.others) == 3
     assert len(fake.requests) == 2  # 没有入选论文时不生成概览
     assert store.read_model(digest_path(TODAY), Digest) is not None
