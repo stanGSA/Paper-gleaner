@@ -9,6 +9,10 @@ Zotero 文库只在本机缓存，读取失败时用旧缓存或跳过，不影�
 reports/ 缓存，之后 /deep 直接返回缓存。获取全文或 LLM 失败、剩余 token 预算不够时跳过，
 在运行结果中说明，不影响日报；兜底运行补发评论时从缓存读取报告，不重新生成。
 
+arXiv RSS 没有公告条目时（节假日，或 arXiv 推迟了公告），改用 arXiv API 补抓所关注分类中
+最近提交的论文（sources.arxiv.fallback_max_results 篇），去掉处理过的再照常排序发布，
+并在概览里说明；补抓失败或没有可发布的论文时，也发布一个说明原因的 Issue。
+
 推送渠道只在日报发布成功时发送（没有启用 GitHub Issue 时照样发送，只是不带链接）；
 没有达到 min_score 的论文、没有新公告和 dry-run 都不发送。各渠道的结果记在 digest 里，
 兜底运行只补发失败的渠道。
@@ -43,6 +47,7 @@ from gleaner.ranking import Embedder, coarse_rank, rerank, summarize
 from gleaner.reader import FulltextFetcher, deep_read, load_report, save_report
 from gleaner.render.markdown import kilo
 from gleaner.sources import ArxivSource, Source
+from gleaner.sources.base import SourceError
 from gleaner.sources.zotero import ZoteroResult
 from gleaner.store import DataStore
 
@@ -51,9 +56,15 @@ Status = Literal[
     "preview",  # 没有发布渠道（dry-run），只生成了日报
     "already_published",  # 当天的日报已发布，跳过
     "repaired",  # 当天的日报已发布，补发了上次没发出去的评论或推送
-    "no_announcements",  # arXiv 今天没有公告
+    "no_announcements",  # arXiv 今天没有公告，补抓也没有取到论文（没有发布渠道时）
     "nothing_relevant",  # 没有达到 min_score 的论文，不发布
 ]
+
+NO_ANNOUNCEMENTS = "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）"
+FALLBACK_NOTICE = (
+    "⚠️ 今天 arXiv RSS 没有公告条目，以下论文改由 arXiv API 补抓"
+    "（所关注分类中最近提交、之前没有推送过的论文，部分可能还没有正式公告）。"
+)
 
 # 判断剩余预算够不够自动深读：输入按 deep_read.max_input_tokens 计，另加这么多输出
 AUTO_DEEP_READ_OUTPUT_TOKENS = 4_000
@@ -84,7 +95,8 @@ class DailyResult:
     status: Status
     digest: Digest | None = None
     existing: IssueRef | None = None
-    sampled: bool = False  # 没有新公告，改用了最近提交的论文
+    sampled: bool = False  # 没有新公告，改用了最近提交的论文试运行
+    fallback: bool = False  # 没有新公告，改用 arXiv API 补抓了最近提交的论文
     sync: SyncResult = field(default_factory=SyncResult)  # 第 0 步：表情同步
     warnings: list[str] = field(default_factory=list)  # 不影响日报的问题，如表情同步失败
     notified: dict[str, ChannelResult] = field(default_factory=dict)  # 这次发送的渠道及结果
@@ -165,18 +177,28 @@ def run_daily(
     source = source or ArxivSource(config.sources.arxiv)
     papers = source.fetch_latest()
     sampled = not papers and bool(sample_size) and publisher is None and not notifiers
+    fallback = not papers and not sampled and config.sources.arxiv.fallback_max_results > 0
+    fallback_failed = False
     if sampled and sample_size:
         papers = source.fetch_recent(sample_size)
+    elif fallback:
+        # RSS 为空不一定是节假日：补抓最近提交的论文，照常去重、排序、发布
+        try:
+            papers = source.fetch_recent(config.sources.arxiv.fallback_max_results)
+        except SourceError as e:
+            fallback_failed = True
+            warnings.append(f"arXiv RSS 没有公告条目，改用 arXiv API 补抓也失败了：{e}")
     if not papers:
         digest = Digest(
             day=today,
             generated_at=now,
-            overview="今天没有新公告（arXiv 周末和节假日不更新）。",
+            overview=_empty_overview(fallback=fallback, failed=fallback_failed),
             stats=RunStats(
+                fallback=fallback,
                 feedback=FeedbackStats(
                     synced=sync.records,
                     sync_error=sync.error,
-                )
+                ),
             ),
         )
         status: Status = "no_announcements"
@@ -196,7 +218,7 @@ def run_daily(
                 }
             ],
         )
-        return DailyResult(status, digest, sync=sync, warnings=warnings)
+        return DailyResult(status, digest, fallback=fallback, sync=sync, warnings=warnings)
 
     seen = set() if sampled else load_seen(store, today)
     filtered = apply_filters(papers, seen=seen, config=config.filters)
@@ -235,6 +257,8 @@ def run_daily(
         muted_topics=[topic.topic for topic in memory.muted],
     )
     overview = summarize(reranked.selected, llm, config.language)
+    if fallback:
+        overview = f"{FALLBACK_NOTICE}\n\n{overview}" if overview else FALLBACK_NOTICE
     reports, deep_read_notes = _auto_deep_read(
         reranked.selected[: config.deep_read.auto_top_m],
         config=config,
@@ -273,15 +297,17 @@ def run_daily(
             zotero=library.stats if library is not None else None,
             deep_read=len(reports),
             deep_read_notes=deep_read_notes,
+            fallback=fallback,
         ),
     )
 
     status: Status = "preview"
     notified: dict[str, ChannelResult] = {}
     if not digest.papers:
-        digest = digest.model_copy(
-            update={"overview": "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"}
+        overview = _nothing_relevant_overview(
+            fallback=fallback, fetched=len(papers), fresh=len(filtered.papers)
         )
+        digest = digest.model_copy(update={"overview": overview})
         status = "nothing_relevant"
         if publisher is not None:
             digest = publisher.publish(digest, reports)
@@ -312,8 +338,35 @@ def run_daily(
         ],
     )
     return DailyResult(
-        status, digest, sampled=sampled, sync=sync, warnings=warnings, notified=notified
+        status,
+        digest,
+        sampled=sampled,
+        fallback=fallback,
+        sync=sync,
+        warnings=warnings,
+        notified=notified,
     )
+
+
+def _empty_overview(*, fallback: bool, failed: bool) -> str:
+    """没有取到任何论文时日报里的说明。"""
+    if not fallback:
+        tail = ""
+    elif failed:
+        tail = "；改用 arXiv API 补抓也失败了（详见运行日志）"
+    else:
+        tail = "；改用 arXiv API 补抓也没有取到论文"
+    return f"{NO_ANNOUNCEMENTS}{tail}，因此没有可发布的论文。"
+
+
+def _nothing_relevant_overview(*, fallback: bool, fetched: int, fresh: int) -> str:
+    """取到了论文、但没有一篇入选时日报里的说明；fresh 是去重和黑名单过滤后剩下的篇数。"""
+    if not fallback:
+        return "今天有新公告，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
+    head = f"{NO_ANNOUNCEMENTS}；改用 arXiv API 补抓了最近提交的 {fetched} 篇论文"
+    if not fresh:
+        return f"{head}，但都已在之前的日报中处理过或被关键词黑名单排除，没有新论文可发布。"
+    return f"{head}，但没有论文达到当前筛选阈值，因此没有可发布的论文。"
 
 
 def _auto_deep_read(

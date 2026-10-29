@@ -2,7 +2,8 @@
 
 arXiv 的 RSS（rss.arxiv.org）每个公告日更新一次，条目里已包含标题、摘要、作者、
 分类和公告类型（new / cross / replace / replace-cross），日报所需的元数据都在其中。
-周末和节假日没有公告时，RSS 不含任何条目；这时试运行改用 arXiv API 取最近提交的论文。
+周末和节假日没有公告时，RSS 不含任何条目；这时改用 arXiv API 取最近提交的论文
+（正式运行去掉处理过的再照常排序发布，试运行只用来检查配置）。
 按 ID 查询（/deep、/compare 中不在日报里的论文）也走 arXiv API。
 
 arXiv 要求 API 请求间隔至少 3 秒；同一进程内对 arxiv.org 的请求（API、HTML 全文、PDF）
@@ -87,14 +88,21 @@ class ArxivSource:
         return [paper for paper in papers if self._wanted(paper)]
 
     def fetch_recent(self, limit: int) -> list[Paper]:
-        """所关注分类中最近提交的 limit 篇论文，不区分公告日。"""
+        """所关注分类中最近提交的 limit 篇论文，不区分公告日。
+
+        API 没有公告类型：不包含交叉投递时，只保留主分类在所关注分类中的论文。
+        """
         params = {
             "search_query": " OR ".join(f"cat:{c}" for c in self.config.categories),
             "sortBy": "submittedDate",
             "sortOrder": "descending",
             "max_results": limit,
         }
-        return parse_api(self._api(params))
+        papers = parse_api(self._api(params))
+        if self.config.include_cross_list:
+            return papers
+        wanted = set(self.config.categories)
+        return [paper for paper in papers if paper.categories and paper.categories[0] in wanted]
 
     def search(self, query: str, limit: int = 10) -> list[Paper]:
         """按关键词检索 arXiv（各个词都要出现在标题、摘要等字段中），按相关度排序。
@@ -180,12 +188,16 @@ def _parse_api_entry(entry: Any) -> Paper | None:
     match = _API_ENTRY_ID_RE.search(entry.get("id", "").strip())
     if match is None or not entry.get("title", "").strip():
         return None
+    categories = [tag["term"] for tag in entry.get("tags", []) if tag.get("term")]
+    # 主分类排在最前；没有 arxiv:primary_category 时按原顺序
+    if (primary := (entry.get("arxiv_primary_category") or {}).get("term")) in categories:
+        categories = [primary, *(c for c in categories if c != primary)]
     return Paper(
         id=match.group(1),
         title=_squash(entry.get("title", "")),
         abstract=_squash(entry.get("summary", "")),
         authors=[_squash(a["name"]) for a in entry.get("authors", []) if a.get("name")],
-        categories=[tag["term"] for tag in entry.get("tags", []) if tag.get("term")],
+        categories=categories,
         announced=_to_datetime(entry.get("published_parsed")),
     )
 

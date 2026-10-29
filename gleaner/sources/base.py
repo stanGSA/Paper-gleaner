@@ -19,5 +19,5 @@ class Source(Protocol):
         ...
 
     def fetch_recent(self, limit: int) -> list[Paper]:
-        """返回最近提交的 limit 篇论文，不区分公告日（用于没有新公告时的试运行）。"""
+        """返回最近提交的 limit 篇论文，不区分公告日（没有新公告时补抓或试运行）。"""
         ...

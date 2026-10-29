@@ -141,7 +141,7 @@ flowchart LR
 | 步骤 | 说明 |
 | --- | --- |
 | 0. 同步反馈 | 扫描最近 7 天日报 Issue 中每篇论文评论的 reactions，增量写入反馈记录（原因见 [3.4](#34-反馈与记忆)）。只统计仓库所有者的 👍/👎；失败时日报照常运行，只给出警告 |
-| 1. 抓取 | 用 arXiv RSS 获取所关注分类当天公告的论文（区分 new / cross / replace / replace-cross）。RSS 条目已包含标题、摘要、作者和分类，无需再调用 API。没有新公告（周末、节假日）时直接结束，不发 Issue |
+| 1. 抓取 | 用 arXiv RSS 获取所关注分类当天公告的论文（区分 new / cross / replace / replace-cross）。RSS 条目已包含标题、摘要、作者和分类，无需再调用 API。RSS 没有公告条目（节假日或 arXiv 推迟公告）时，改用 arXiv API 补抓所关注分类中最近提交的论文（`fallback_max_results` 篇），之后照常去重、排序、发布，并在概览里注明；补抓失败或没有可发布的论文时，发布一条说明原因的 Issue |
 | 2. 去重与规则过滤 | 排除已处理过的 ID；默认排除 replace 版本；支持关键词白名单（必推）和黑名单（必不推） |
 | 3. 向量粗筛 | 计算每篇论文与「兴趣锚点」的综合相似度，保留 Top K（默认 50），详见 3.1.1 |
 | 4. LLM 精排 | LLM 分批打分并生成相关理由，保留分数不低于阈值的 Top N（默认 10），详见 3.1.2 |
@@ -528,6 +528,7 @@ sources:
     categories: [cs.CL, cs.LG, cs.AI]
     include_cross_list: true
     include_replace: false
+    fallback_max_results: 500      # RSS 没有公告条目时改用 arXiv API 补抓的篇数；0 表示不补抓
 
 profile:
   interests_file: profile/interests.md
@@ -692,7 +693,7 @@ concurrency:
 | 飞书 | 自定义机器人 + 签名校验 | 消息卡片列出论文（默认最多 10 篇，请求体不超过 20 KB），附「去 Issue 讨论」按钮 |
 | 企业微信 | 群机器人 markdown 消息 | content 最多 4096 字节，只发 Top 5 摘要和链接 |
 
-- **发送时机**：日报 Issue 发布成功后发送；没有达到 `min_score` 的论文、没有新公告和 dry-run 都不发送。没有启用 GitHub Issue 时照样发送，只是不带链接；
+- **发送时机**：日报 Issue 发布成功、且有入选论文时发送（包括 RSS 为空时补抓的论文）；没有达到 `min_score` 的论文、没有新公告且补抓不到论文，以及 dry-run 都不发送。没有启用 GitHub Issue 时照样发送，只是不带链接；
 - **只发一次**：各渠道的发送结果记在当天的 digest 里，11:30 的兜底运行只补发上次失败的渠道；
 - **转义**：标题、理由等外部文本由各渠道自己转义，邮件里不能注入 HTML，飞书里不能 `<at>` 人，企业微信里不能写 `<@userid>`（做法见 13.3）；
 - **验证**：配置好后运行 `gleaner notify-test`（或 Daily workflow 的 `notify_test` 开关），给已启用的渠道各发一条测试消息；`gleaner check` 报告各渠道的配置状态。

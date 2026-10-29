@@ -784,6 +784,8 @@ def _report_body(result: DailyResult, missing: int) -> str:
             lines.append(f"· 补发上次失败的渠道：{results_line(result.notified)}")
         return "\n".join(line for line in [*lines, warning] if line)
     if result.status == "no_announcements":
+        if result.digest is not None and result.digest.overview:
+            return result.digest.overview
         return "今天没有新公告（arXiv 周末和节假日不更新）。"
 
     digest = result.digest

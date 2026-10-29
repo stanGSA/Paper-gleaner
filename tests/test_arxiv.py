@@ -140,6 +140,37 @@ def test_fetch_recent(api_bytes: bytes) -> None:
     assert params["max_results"] == "20"
 
 
+def primary_lg(api_bytes: bytes) -> bytes:
+    """把第一篇论文（分类 cs.CL、cs.LG）的主分类改成 cs.LG。"""
+    return api_bytes.replace(b'term="cs.CL" scheme', b'term="cs.LG" scheme', 1)
+
+
+def test_parse_api_puts_primary_category_first(api_bytes: bytes) -> None:
+    content = primary_lg(api_bytes)
+
+    papers = parse_api(content)
+
+    assert papers[0].categories == ["cs.LG", "cs.CL"]
+    assert papers[1].categories == ["cs.CL"]  # 没有 primary_category 时按原顺序
+
+
+@respx.mock
+def test_fetch_recent_without_cross_list_keeps_primary_category(api_bytes: bytes) -> None:
+    content = primary_lg(api_bytes)
+    respx.get(API_URL).mock(return_value=httpx.Response(200, content=content))
+
+    with_cross = ArxivSource(
+        ArxivConfig(categories=["cs.LG"]), limiter=RateLimiter(0)
+    ).fetch_recent(20)
+    without_cross = ArxivSource(
+        ArxivConfig(categories=["cs.LG"], include_cross_list=False),
+        limiter=RateLimiter(0),
+    ).fetch_recent(20)
+
+    assert [p.id for p in with_cross] == ["2610.00001", "2610.00002"]
+    assert [p.id for p in without_cross] == ["2610.00001"]  # 2610.00002 的主分类是 cs.CL
+
+
 @respx.mock
 def test_fetch_recent_http_error() -> None:
     respx.get(API_URL).mock(return_value=httpx.Response(503))
