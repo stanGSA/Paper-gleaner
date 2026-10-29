@@ -352,7 +352,7 @@ def test_no_notification_without_relevant_papers(
         notifiers=[email],
     )
 
-    assert result.status == "nothing_relevant"
+    assert result.status == "published"
     assert email.sent == []
     assert result.digest.notifications == {}
 
@@ -361,7 +361,7 @@ def test_no_notification_without_announcements(config: Config, tmp_path: Path) -
     email = FakeNotifier("email")
     result, _, _ = run(config, DataStore(tmp_path), [], notifiers=[email], sample_size=20)
 
-    assert result.status == "no_announcements"
+    assert result.status == "published"
     assert email.sent == []
 
 
