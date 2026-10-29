@@ -187,7 +187,14 @@ def run_daily(
         store.write_model(digest_path(today), digest)
         store.append_jsonl(
             f"stats/{today:%Y-%m}.jsonl",
-            [{"day": today.isoformat(), "status": status, "issue": digest.issue_number, **digest.stats.model_dump()}],
+            [
+                {
+                    "day": today.isoformat(),
+                    "status": status,
+                    "issue": digest.issue_number,
+                    **digest.stats.model_dump(),
+                }
+            ],
         )
         return DailyResult(status, digest, sync=sync, warnings=warnings)
 
