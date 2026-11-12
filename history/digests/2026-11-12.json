@@ -1,6 +1,6 @@
 {
   "day": "2026-11-12",
-  "generated_at": "2026-11-12T08:37:49.706236Z",
+  "generated_at": "2026-11-12T11:39:43.206422Z",
   "overview": "今天 arXiv RSS 没有公告条目（周末、节假日，或 arXiv 推迟了公告）；改用 arXiv API 补抓了最近 7 天内提交的 500 篇论文，但都已在之前的日报中处理过或被关键词黑名单排除，没有新论文可发布。",
   "papers": [],
   "others": [],
@@ -15,7 +15,7 @@
     "llm_calls": 0,
     "prompt_tokens": 0,
     "completion_tokens": 0,
-    "duration_seconds": 4.5,
+    "duration_seconds": 3.8,
     "feedback": {
       "up": 1,
       "down": 0,
